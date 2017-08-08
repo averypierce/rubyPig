@@ -1,86 +1,112 @@
 #!/usr/bin/env ruby
 
 #Avery VanKirk August 2017
-#Ruby Pig implementation. 
-#2 connects. Heads listen, Tails connects.
+#Ruby Pig implementation.
+
+#Heads listem, tails connect
+#Heads are on the left, Tails are on the right. 
 require 'socket'
 
-class Pig
-	#attr_accessor :lip
-	#attr_accessor :port
+Default = 36751
 
-	def initialize(lip = 'localhost', lport = 36751, rip = 'localhost', rport = 36752)
+class Pig
+
+	def initialize(lip = 'localhost', lport = Default, rip = 'localhost', rport = 36752)
 		@lip = lip
 		@lport = lport
 		@rip = rip
 		@rport = rport
+		@users = 0		
 		@head = false
 		@tail = false
-		@users = 0
 	end
 
-	def listen(lip = @lip,lport = @lport)
-		begin
-			server = TCPServer.new(lip,lport)
+	def headup(lip = @lip,lport = @lport)
+		if @head
+			puts "Head is already up"	
+		else	
 			Thread.start do
-				head = server.accept
-				server.close
-				@head = head
-				num = @users
-				@users = @users + 1
-				head.puts "[Server] Connected as head"
-				while line = head.gets
+				@head = PigSocket.new.listen(lip,lport)
+				while line = @head.gets
 					puts "head: #{line}"
-					if @tail
+					begin
 						@tail.puts line
+					rescue Exception => e
+						puts "warning: tail not connected."
 					end
 				end
 			end
-		rescue => e
-			puts "Exception: #{@lip}:#{@lport} - #{ e.message }"
 		end
 	end
 
-	def connect(rip = @rip, rport = @rport)
-		begin
-			Thread.start(TCPSocket.new(rip,rport)) do |tail|
-				@tail = tail
-				tail.puts "[Server] Connected as tail"
-				while line = tail.gets
+	def tailup(rip = @rip,rport = @rport)
+		if @tail
+			puts "Tail is already up"
+		else
+			Thread.start do
+				@tail = PigSocket.new.connect(rip,rport)
+				while line = @tail.gets
 					puts "tail: #{line}"
-					if @head
+					begin
 						@head.puts line
-					end
+					rescue Exception => e
+						puts "warning: head not connected"
+					end					
 				end
-				tail.close
 			end
-		rescue => e
-			puts "Exception: #{@rip}:#{@rport} - #{ e.message }"
-
-		end	
-	end
-
-	def about
-		puts "Head: #{@lip}:#{@lport} - connected: #{@head}"
-		puts "Tail: #{@rip}:#{@rport} - connected: #{@tail}"
+		end
 	end
 end
 
+#Sets up a socket to listen/connect and returns it
+class PigSocket
+
+	def initialize(ip = 'localhost',port = Default)
+		@ip = ip
+		@port = port
+		@conn = nil
+	end
+
+	#Assigns @conn to a listen socket, and returns the socket for optional direct use
+	def listen(ip = @ip,port = @port)
+		begin
+			server = TCPServer.new(ip,port)
+			@conn = server.accept
+			server.close
+			@conn.puts "[Server] Connected as head"
+			return @conn
+		rescue => e
+			puts "Exception: #{@ip}:#{@port} - #{ e.message }"
+		end
+	end
+
+	#Assigns @conn to an active socket, and returns the socket for optional direct use
+	def connect(ip = @ip, port = @port)
+		begin
+			@conn = TCPSocket.new(ip,port)
+			@conn.puts "[Server] Connected as tail"
+			return @conn
+		rescue => e
+			puts "Exception: #{@ip}:#{@port} - #{ e.message }"
+		end	
+	end
+
+	#For sending with pig object instead of returned socket
+	#Will be used for message filtering/processing
+	def send(message)
+		@conn.puts message
+	end
+end
+
+
+
 if __FILE__ == $0
 	p = Pig.new()
-	p.listen
-	p.connect
-	#p.about
+	p.tailup	
+	p.headup
 
 	while true
-		print ">"
-		input = gets.split(" ")
-		puts "input was #{input}"
-		if input[0] == "connect" and input.length == 3
-			p.connect(input[1],input[2])
-		elsif input[0] == "listen" and input.length == 3
-			p.listen(input[1],input[2])		
-		end		
+		sleep(5)	
 	end
 end
 
