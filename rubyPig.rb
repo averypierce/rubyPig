@@ -21,6 +21,8 @@ class Pig
 		@head = false
 		@tail = false
 
+		@allowMultipleConnections = false
+
 		lnabs = []
 		rnabs = []
 
@@ -34,20 +36,27 @@ class Pig
 			readable = ready[0]
 			readable.each do |socket|
 				
-				if socket.instance_of? P
-					if socket.lissen
-						puts "listen socket detected..."
-						@reads.push(socket.accept_nonblock) #by not deleteing listener we are still accepting connections on this thigny
+				if socket.instance_of? TCPServer #getsockopt(SOL_SOCKET,SO_ACCEPTCONN) is not working on linux subsystem
+					#if socket.listening
+					puts "Accepting connection"
+					#@reads.push(socket.accept) #by not deleteing listener we are still accepting connections on this thigny
+					@head = socket.accept
+					@reads.push(@head)
+					if not @allowMultipleConnections
+						@reads.delete(socket)
+						socket.close
 					end
 				else
 					buf = socket.gets
+
 					if socket == @head
 						src = "head"
 						puts buf
-						@dispatcher.forward(@head,@tail,buf)
+						@dispatcher.forward(socket,@tail,TextMessage.new(buf))
 					elsif socket == @tail
-						src = "tail".
-						#@dispatcher.forward(@tail,@head,buf)
+						src = "tail"
+						puts buf
+						@dispatcher.forward(socket,@head,TextMessage.new(buf))
 					elsif socket == @stdin
 						src = "keyboard"
 						@dispatcher.forward(@head,@tail,TextMessage.new(buf))
@@ -70,8 +79,8 @@ class Pig
 			puts "Head is already up"	
 		else
 			begin
-				@head = PigSocket.new.listen(lip,lport)
-				@reads.push(@head.conn)
+				listenSocket = TCPServer.new(lip,lport)
+				@reads.push(listenSocket)
 			rescue => e
 				puts "Exception: #{ e.message }"
 			end		
@@ -83,8 +92,10 @@ class Pig
 			puts "Tail is already up"	
 		else
 			begin
-				@tail = PigSocket.new.connect(rip,rport)
-				@reads.push(@tail.conn)
+				@tail = TCPSocket.new(rip,rport)
+				if @tail
+					@reads.push(@tail)
+				end
 			rescue => e
 				puts "Exception: #{ e.message }"
 			end	
@@ -101,6 +112,15 @@ class Pig
 	end
 end
 
+#Interface for how a filter should work
+class Filter
+	def filter(message)
+		#do whatever
+		return message
+	end
+end
+
+#
 class PigDispatcher
 
 	def initialize(echo = false,forward = true)
@@ -109,13 +129,20 @@ class PigDispatcher
 		@filters = []
 	end
 
+	def addFilter(filter)
+		filters.push(filter)
+	end
+
 	def forward(sourceSocket,destSocket,message)
 
-		#apply filters
-		if forward
+		@filters.each do |filter|
+			message = filter.filter(message)
+		end
+
+		if destSocket and @forward
 			destSocket.puts(message.asJson)
 		end
-		if echo
+		if sourceSocket and @echo
 			sourceSocket.puts(message.asJson)
 		end
 	end
@@ -123,81 +150,9 @@ end
 
 
 
-class P < TCPServer
-
-	attr_accessor :lissen
-	def initialize(ip,port)
-		super
-		@lissen = true
-	end
-end
-
-####!!! lets get rid of this... !!!####
-#Socket Wrapper
-#Sets up a socket to listen/connect and returns it
-class PigSocket
-
-	attr_accessor :conn
-
-	def initialize(ip = 'localhost',port = Default)
-		@ip = ip
-		@port = port		
-		@conn = nil
-	end
-
-	def fileno
-		return @conn.fileno
-	end
-
-	#Assigns @conn to a listen socket, and returns the socket for optional direct use
-	def listen(ip = @ip,port = @port)
-		begin
-			listenSocket = P.new(ip,port)
-			puts listenSocket.lissen
-			#We could put in a pigmessage WHOAMI thing here
-			#@conn.puts "HTTP/1.1 200 OK\r\nServer: WebServer\r\nContent-Type: text/html\r\nContent-Length: 3\r\nConnection: close\r\n\r\n123"
-			#@conn = listenSocket.accept
-			#listenSocket.close
-			@conn = listenSocket
-			#@conn.puts "[Server] Connected as head"
-			#return listenSocket
-			#puts @conn.fileno
-			return self
-		rescue => e
-			puts "Exception: #{@ip}:#{@port} - #{ e.message }"
-		end
-	end
-
-	def accept(listenSocket)
-		@conn = listenSocket.accept
-		listenSocket.close
-		@conn.puts "[Server] Connected as head"
-		return @conn
-	end
-
-	#Assigns @conn to an active socket, and returns the socket for optional direct use
-	def connect(ip = @ip, port = @port)
-		begin
-			@conn = TCPSocket.new(ip,port)
-			@conn.puts "[Server] Connected as tail"
-			return self
-		rescue => e
-			puts "Exception: #{@ip}:#{@port} - #{ e.message }"
-		end	
-	end
-
-	#For sending with pig object instead of returned socket
-	#Will be used for message filtering/processing
-	def send(message)
-		@conn.puts message
-	end
-end
-
-
-
 if __FILE__ == $0
 	p = Pig.new()
-	#p.tailup	
+	p.tailUp	
 	p.headUp
 	p.keyboardUp
 	p.main
