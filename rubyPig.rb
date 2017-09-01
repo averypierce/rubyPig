@@ -40,9 +40,10 @@ class Pig
 			ready = IO.select(@reads)
 			readable = ready[0]
 			readable.each do |socket|
-				
+
+				#if socket is listening listening				
 				if socket.instance_of? TCPServer #getsockopt(SOL_SOCKET,SO_ACCEPTCONN) is not working on linux subsystem
-					#if socket.listening
+					
 					puts "Accepting connection"
 					#@reads.push(socket.accept) #by not deleteing listener we are still accepting connections on this thigny
 					@head = socket.accept
@@ -54,31 +55,34 @@ class Pig
 				else
 					buf = socket.gets
 
+					if buf
+						if socket == @head
+							src = "head"
+							destSocket = @tail
+						elsif socket == @tail
+							src == "tail"
+							destSocket = @head
+						end
+					end				
+
 					if buf == nil
 						@reads.delete(socket)
 						socket.close
-						puts "[a client disconnected]"
+						puts "[#{src} has disconnected]"
 					end
-				
+					
 					if buf
-						if socket == @head
-							m = PigMessage.new
-							m.load(buf)
-							src = "head"
-							m.from = "left"
-							@dispatcher.forward(socket,@tail,m)
-						elsif socket == @tail
-							m = PigMessage.new
-							m.load(buf)
-							src = "tail"
-							m.from = "right"
-							@dispatcher.forward(socket,@head,m)
-						elsif socket == @stdin
+						if socket == @stdin
 							if buf[0] == "i"
 								@dispatcher.forward(@head,@tail,TextMessage.new(buf[2..-1]))
 							else
 								keyboardCommands(buf)
 							end
+						else
+							m = PigMessage.new
+							m.load(buf)
+							m.from = src
+							@dispatcher.forward(socket,destSocket,m)
 						end
 					end
 				end
@@ -174,7 +178,7 @@ class TopologyFilter < Filter
 		return pigMessage
 	end
 end
-#
+
 class PigDispatcher
 
 	def initialize(echo = false,forward = true)
