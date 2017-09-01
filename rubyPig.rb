@@ -12,14 +12,16 @@ Default = 36751
 
 class Pig
 
-	def initialize(lip = 'localhost', lport = Default, rip = 'localhost', rport = 36752)
-		@lip = lip
+	def initialize(lip = 'localhost', lport = 36751, rip = 'localhost', rport = 36752)
+		$lip = lip
 		$lport = lport
-		@rip = rip
+		$rip = rip
 		$rport = rport
 		@users = 0		
 		@head = false
 		@tail = false
+
+		@shash = {"head" => @head,"tail" => @tail}
 
 		@selfIP = Socket.ip_address_list[0].ip_address
 
@@ -27,11 +29,12 @@ class Pig
 		@allowMultipleConnections = false
 
 		lnabs = []
-		rnabs = []
+		$rnabs = []
 
 		@reads = []
 		@dispatcher = PigDispatcher.new
 		@dispatcher.addFilter(TopologyFilter.new)
+		#@dispatcher.addFilter(ReverseFilter.new)
 	end
 
 	def main
@@ -40,7 +43,7 @@ class Pig
 			ready = IO.select(@reads)
 			readable = ready[0]
 			readable.each do |socket|
-
+				src = ""
 				#if socket is listening listening				
 				if socket.instance_of? TCPServer #getsockopt(SOL_SOCKET,SO_ACCEPTCONN) is not working on linux subsystem
 					
@@ -55,20 +58,37 @@ class Pig
 				else
 					buf = socket.gets
 
-					if buf
-						if socket == @head
-							src = "head"
-							destSocket = @tail
-						elsif socket == @tail
-							src == "tail"
-							destSocket = @head
-						end
-					end				
+					if socket == @head
+						src = "head"
+						destSocket = @tail
+					end
+					if socket == @tail
+						src == "tail"
+						destSocket = @head
+					end
 
 					if buf == nil
+						
+						if socket == @head
+							@head = false
+							puts "[#{src} has disconnected]"
+							puts "Reopening listener socket for network healing"
+							self.headUp(@selfIP,$lport)
+						end
+						if socket == @tail
+							@tail = false
+							puts "[#{src} has disconnected]"
+							puts "PigNode lost. Attempting to reconnect."
+							$rnabs.each do |pigHeal|
+								self.tailUp(pigHeal[0],pigHeal[1].to_i)
+								if @tail
+									break
+								end
+							end
+						end
 						@reads.delete(socket)
-						socket.close
-						puts "[#{src} has disconnected]"
+						socket.close					
+
 					end
 					
 					if buf
@@ -91,11 +111,11 @@ class Pig
 	end
 
 	def sendTopo
-		hash = {"from" => "pig","to" => "all","type" => "topo","payload" => [[@selfIP,36751]]}
+		hash = {"from" => "pig","to" => "all","type" => "topo","payload" => [["END","END"]]}
 		b = JSON.generate(hash)
 		#puts b
-		if not @head
-			@tail.puts(b)
+		if not @tail
+			@head.puts(b)
 		else
 			puts "Only leftmost pig can initiate topology message"
 		end
@@ -114,16 +134,17 @@ class Pig
 		end 
 	end
 
-	def headUp(lip = @lip,lport = $lport)
+	def headUp(lip = $lip,lport = $lport)
 		if @head
 			puts "Head is already up"	
 		else
 			begin
 				listenSocket = TCPServer.new(lip,lport)
 				@reads.push(listenSocket)
+				$lip = lip
 				$lport = lport
 			rescue => e
-				puts "Exception: #{ e.message }"
+				puts "Exception: #{ e.message } port: #{lport} IP: #{lip}"
 			end		
 		end
 	end
@@ -137,9 +158,10 @@ class Pig
 				if @tail
 					@reads.push(@tail)
 				end
-				$rport = rport 
+				$rport = rport
+				puts "Connection established"
 			rescue => e
-				puts "Exception: #{ e.message }"
+				puts "Exception: #{ e.message } port: #{rport} IP: #{rip}"
 			end	
 		end
 	end
@@ -162,6 +184,13 @@ class Filter
 	end
 end
 
+class ReverseFilter
+	def filter(pigMessage)
+		pigMessage.payload = pigMessage.payload.reverse 
+		return pigMessage
+	end
+end
+
 #sending your own data vs data from who you are connected to?
 class TopologyFilter < Filter
 	def filter(pigMessage)
@@ -172,7 +201,8 @@ class TopologyFilter < Filter
 			elsif pigMessage.from == "right"
 				port = $lport
 			end
-			pigMessage.payload.push([Socket.ip_address_list[0].ip_address,port])
+			$rnabs = pigMessage.payload
+			pigMessage.payload.unshift([Socket.ip_address_list[0].ip_address,$lport])
 			pigMessage.display
 		end
 		return pigMessage
