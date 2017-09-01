@@ -4,46 +4,59 @@ require 'json'
 
 module Pjson
 
-	def asJson(type = @type,body = @payload,from = 'pig',to = 'all')
-		hash = {"from" => from,"to" => to,"type" => type,"body" => body}
+	def asJson(type = @type,payload = @payload,from = 'pig',to = 'all')
+		hash = {"from" => from,"to" => to,"type" => type,"payload" => payload}
 		return JSON.generate(hash)
 	end
 
 	def fromJson(message)
 		begin
+			puts "fromJason() recieved #{message}"
 			data = JSON.parse(message)
 			@from = data["from"]
 			@to = data["to"]
 			@type = data["type"]
-			@payload = data["body"]
-		rescue
+			@payload = data["payload"]
+			return true
+		rescue => e
+			puts "Exception: #{ e.message }"
 			puts "Not a valid JSON message"
+			return false
 		end
 	end
 end
 
 #module Pxml
-
-
 class PigMessage
 
 	include Pjson
 	attr_accessor :type
+	attr_accessor :from
 	attr_accessor :to
+	attr_accessor :payload
 
 	def initialize
 		@from = nil
 		@to = nil
-		@type = nil
+		@type = "normal"
 		@payload = nil
 	end
 
+	def load(message)
+		if not fromJson(eval("'"+message+"'"))
+			puts "loading message as raw"
+			@payload = message.to_s
+		end
+	end
+
 	def display
-		puts @payload
+		puts "from: #{@from}"
+		puts "to: #{@to}"
+		puts "type: #{@type}"
+		puts "payload: #{@payload}"
 	end
 end
 
-#A plain-text message 
 class TextMessage < PigMessage
 
 	def initialize(text,from = 'pig',to = 'all')
@@ -53,15 +66,3 @@ class TextMessage < PigMessage
 		@payload = text
 	end
 end
-
-#This is a message pertaining to topology of the piggy network
-class TopoMessage < PigMessage
-
-	def initialize(text,from = 'pig',to = 'all')
-		@from = from
-		@to = to
-		@type = 'text'
-		@payload = text
-	end
-end
-

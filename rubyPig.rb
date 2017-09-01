@@ -14,12 +14,15 @@ class Pig
 
 	def initialize(lip = 'localhost', lport = Default, rip = 'localhost', rport = 36752)
 		@lip = lip
-		@lport = lport
+		$lport = lport
 		@rip = rip
-		@rport = rport
+		$rport = rport
 		@users = 0		
 		@head = false
 		@tail = false
+
+		@selfIP = Socket.ip_address_list[0].ip_address
+
 
 		@allowMultipleConnections = false
 
@@ -28,9 +31,11 @@ class Pig
 
 		@reads = []
 		@dispatcher = PigDispatcher.new
+		@dispatcher.addFilter(TopologyFilter.new)
 	end
 
 	def main
+		#self.headUp
 		while true
 			ready = IO.select(@reads)
 			readable = ready[0]
@@ -49,45 +54,77 @@ class Pig
 				else
 					buf = socket.gets
 
-					if socket == @head
-						src = "head"
-						puts buf
-						@dispatcher.forward(socket,@tail,TextMessage.new(buf))
-					elsif socket == @tail
-						src = "tail"
-						puts buf
-						@dispatcher.forward(socket,@head,TextMessage.new(buf))
-					elsif socket == @stdin
-						src = "keyboard"
-						@dispatcher.forward(@head,@tail,TextMessage.new(buf))
-						break
+					if buf == nil
+						@reads.delete(socket)
+						socket.close
+						puts "[a client disconnected]"
 					end
-					
+				
 					if buf
-						print "recv from ",src,": "
-						puts buf
-						recv = PigMessage.new.fromJson(buf)
-						recv.display
+						if socket == @head
+							m = PigMessage.new
+							m.load(buf)
+							src = "head"
+							m.from = "left"
+							@dispatcher.forward(socket,@tail,m)
+						elsif socket == @tail
+							m = PigMessage.new
+							m.load(buf)
+							src = "tail"
+							m.from = "right"
+							@dispatcher.forward(socket,@head,m)
+						elsif socket == @stdin
+							if buf[0] == "i"
+								@dispatcher.forward(@head,@tail,TextMessage.new(buf[2..-1]))
+							else
+								keyboardCommands(buf)
+							end
+						end
 					end
 				end
 	        end
 	    end
 	end
 
-	def headUp(lip = @lip,lport = @lport)
+	def sendTopo
+		hash = {"from" => "pig","to" => "all","type" => "topo","payload" => [[@selfIP,36751]]}
+		b = JSON.generate(hash)
+		#puts b
+		if not @head
+			@tail.puts(b)
+		else
+			puts "Only leftmost pig can initiate topology message"
+		end
+	end
+
+	def keyboardCommands(command)
+		command = command.split
+		if command[0] == "listen"
+			self.headUp(command[1],command[2])
+		end
+		if command[0] == "connect"
+			self.tailUp(command[1],command[2])
+		end
+		if command[0] == "sendtopo"
+			self.sendTopo
+		end 
+	end
+
+	def headUp(lip = @lip,lport = $lport)
 		if @head
 			puts "Head is already up"	
 		else
 			begin
 				listenSocket = TCPServer.new(lip,lport)
 				@reads.push(listenSocket)
+				$lport = lport
 			rescue => e
 				puts "Exception: #{ e.message }"
 			end		
 		end
 	end
 
-	def tailUp(rip = @rip,rport = @rport)
+	def tailUp(rip = @rip,rport = $rport)
 		if @tail
 			puts "Tail is already up"	
 		else
@@ -96,6 +133,7 @@ class Pig
 				if @tail
 					@reads.push(@tail)
 				end
+				$rport = rport 
 			rescue => e
 				puts "Exception: #{ e.message }"
 			end	
@@ -114,12 +152,28 @@ end
 
 #Interface for how a filter should work
 class Filter
-	def filter(message)
+	def filter(pigMessage)
 		#do whatever
-		return message
+		return pigMessage
 	end
 end
 
+#sending your own data vs data from who you are connected to?
+class TopologyFilter < Filter
+	def filter(pigMessage)
+		if pigMessage.type == "topo"
+			puts "processing Topology message"
+			if pigMessage.from == "left"
+				port = $rport
+			elsif pigMessage.from == "right"
+				port = $lport
+			end
+			pigMessage.payload.push([Socket.ip_address_list[0].ip_address,port])
+			pigMessage.display
+		end
+		return pigMessage
+	end
+end
 #
 class PigDispatcher
 
@@ -130,18 +184,19 @@ class PigDispatcher
 	end
 
 	def addFilter(filter)
-		filters.push(filter)
+		@filters.push(filter)
 	end
 
 	def forward(sourceSocket,destSocket,message)
-
+		message.display
 		@filters.each do |filter|
 			message = filter.filter(message)
 		end
-
+		
 		if destSocket and @forward
 			destSocket.puts(message.asJson)
 		end
+
 		if sourceSocket and @echo
 			sourceSocket.puts(message.asJson)
 		end
@@ -152,8 +207,8 @@ end
 
 if __FILE__ == $0
 	p = Pig.new()
-	p.tailUp	
-	p.headUp
+	#p.tailUp	
+	#p.headUp
 	p.keyboardUp
 	p.main
 
