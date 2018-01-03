@@ -1,9 +1,9 @@
-# rubyPig
-WIP ruby version of pig networking project
+# rubyPig ![Screenshot of Component Page](https://raw.githubusercontent.com/averypierce/rubyPig/master/piggy.png)
 
--pigs can connect to each other to form a network chain and send data back and forth
--if a pig disconnects from the network chain, remaining pigs attempt to reestablish connection without it
--Each pig can be used to view/filter/edit the messages as they are passed through
-eg pig0 could use a filter to encrypt a message, pig1 could be used to view and verify that the message is actually encrypted during transport
-,and pig2 could use a filter to decrypt the message. 
-
+#### Piggy is a network tool that receives, filters, and sends messages to other piggy instances in order to monitor or process data 
+ * Defined a simple protocol for pig-nodes to send each other messages and metadata 
+ * Utilized good design practices to make code highly extensible   
+ * Implemented a feature to reestablish communication chain if any pig-nodes are disconnected 
+ 
+ *Tools used: Ruby, TCP*
+ 
